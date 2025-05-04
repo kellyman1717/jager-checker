@@ -1,0 +1,515 @@
+// index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVM Wallet Eligibility Checker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        textarea {
+            width: 100%;
+            height: 150px;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+        #results {
+            margin-top: 20px;
+            background-color: white;
+            padding: 15px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .wallet-result {
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border-left: 5px solid #ddd;
+        }
+        .eligible {
+            background-color: #dff0d8;
+            border-left-color: #3c763d;
+        }
+        .not-eligible {
+            background-color: #f2dede;
+            border-left-color: #a94442;
+        }
+        .error {
+            background-color: #fcf8e3;
+            border-left-color: #8a6d3b;
+        }
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #e7f3fe;
+            border-radius: 4px;
+        }
+        .stat {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        #progressBar {
+            width: 100%;
+            background-color: #ddd;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        #progressBarFill {
+            height: 20px;
+            background-color: #4CAF50;
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        #chartContainer {
+            margin-top: 20px;
+        }
+        .copy-btn {
+            background-color: #2196F3;
+            margin-left: 10px;
+        }
+        .copy-btn:hover {
+            background-color: #0b7dda;
+        }
+        .details-table {
+            width: 100%;
+            margin-top: 8px;
+            border-collapse: collapse;
+        }
+        .details-table td {
+            padding: 6px;
+            border-bottom: 1px solid #ddd;
+        }
+        .details-table tr:last-child td {
+            border-bottom: none;
+        }
+        .details-table td:first-child {
+            font-weight: bold;
+            width: 30%;
+        }
+        .export-btn {
+            background-color: #673AB7;
+        }
+        .export-btn:hover {
+            background-color: #5E35B1;
+        }
+        .action-buttons {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>EVM Wallet Eligibility Checker</h1>
+    
+    <div>
+        <p>Enter EVM wallet addresses (one per line or comma/space separated):</p>
+        <textarea id="walletInput" placeholder="0x123...abc&#10;0x456...def&#10;0x789...ghi"></textarea>
+        <div class="action-buttons">
+            <button id="checkBtn">Check Eligibility</button>
+            <button id="stopBtn" disabled>Stop Checking</button>
+            <button id="clearBtn">Clear Results</button>
+            <button id="exportBtn" class="export-btn" disabled>Export Results</button>
+        </div>
+    </div>
+    
+    <div id="progressContainer" style="display: none;">
+        <div>Progress: <span id="progressText">0</span>% (<span id="processedCount">0</span>/<span id="totalCount">0</span>)</div>
+        <div id="progressBar">
+            <div id="progressBarFill"></div>
+        </div>
+    </div>
+    
+    <div class="stats" id="stats" style="display: none;">
+        <div class="stat">
+            <div>Total Checked</div>
+            <div class="stat-value" id="totalChecked">0</div>
+        </div>
+        <div class="stat">
+            <div>Eligible</div>
+            <div class="stat-value" id="eligibleCount">0</div>
+        </div>
+        <div class="stat">
+            <div>Not Eligible</div>
+            <div class="stat-value" id="notEligibleCount">0</div>
+        </div>
+        <div class="stat">
+            <div>Error</div>
+            <div class="stat-value" id="errorCount">0</div>
+        </div>
+    </div>
+    
+    <div id="chartContainer">
+        <canvas id="eligibilityChart"></canvas>
+    </div>
+    
+    <div id="results"></div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const walletInput = document.getElementById('walletInput');
+            const checkBtn = document.getElementById('checkBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            const exportBtn = document.getElementById('exportBtn');
+            const resultsDiv = document.getElementById('results');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressText = document.getElementById('progressText');
+            const progressBarFill = document.getElementById('progressBarFill');
+            const processedCount = document.getElementById('processedCount');
+            const totalCount = document.getElementById('totalCount');
+            const statsDiv = document.getElementById('stats');
+            const totalChecked = document.getElementById('totalChecked');
+            const eligibleCount = document.getElementById('eligibleCount');
+            const notEligibleCount = document.getElementById('notEligibleCount');
+            const errorCount = document.getElementById('errorCount');
+            
+            let chart;
+            let isChecking = false;
+            let stopRequested = false;
+            let currentIndex = 0;
+            let wallets = [];
+            let results = [];
+            let stats = {
+                total: 0,
+                eligible: 0,
+                notEligible: 0,
+                error: 0
+            };
+            
+            // Initialize chart
+            const ctx = document.getElementById('eligibilityChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: ['Eligible', 'Not Eligible', 'Error'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: [
+                            '#4CAF50',
+                            '#F44336',
+                            '#FFC107'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Eligibility Distribution'
+                        }
+                    }
+                }
+            });
+            
+            checkBtn.addEventListener('click', startChecking);
+            stopBtn.addEventListener('click', stopChecking);
+            clearBtn.addEventListener('click', clearResults);
+            exportBtn.addEventListener('click', exportResults);
+            
+            function startChecking() {
+                if (isChecking) return;
+                
+                const input = walletInput.value.trim();
+                if (!input) {
+                    alert('Please enter at least one wallet address');
+                    return;
+                }
+                
+                // Parse wallet addresses (support multiple formats)
+                wallets = input.split(/[\n, ]+/)
+                    .map(w => w.trim())
+                    .filter(w => w.length > 0);
+                
+                if (wallets.length === 0) {
+                    alert('No valid wallet addresses found');
+                    return;
+                }
+                
+                // Reset state
+                isChecking = true;
+                stopRequested = false;
+                currentIndex = 0;
+                results = [];
+                stats = {
+                    total: wallets.length,
+                    eligible: 0,
+                    notEligible: 0,
+                    error: 0
+                };
+                
+                // Update UI
+                checkBtn.disabled = true;
+                stopBtn.disabled = false;
+                exportBtn.disabled = true;
+                progressContainer.style.display = 'block';
+                statsDiv.style.display = 'flex';
+                updateStats();
+                updateProgress();
+                
+                // Start processing
+                processNextWallet();
+            }
+            
+            async function processNextWallet() {
+                if (stopRequested || currentIndex >= wallets.length) {
+                    finishChecking();
+                    return;
+                }
+                
+                const wallet = wallets[currentIndex];
+                try {
+                    const response = await fetch(`https://api.jager.meme/api/airdrop/queryAirdrop/${wallet}`);
+                    const data = await response.json();
+                    
+                    const isEligible = data.canAirdrop === true;
+                    const resultClass = isEligible ? 'eligible' : 'not-eligible';
+                    const statusText = isEligible ? 'Eligible ✅' : 'Not Eligible ❌';
+                    
+                    // Save full result
+                    const result = {
+                        wallet,
+                        data,
+                        status: isEligible ? 'eligible' : 'not-eligible',
+                        error: null
+                    };
+                    results.push(result);
+                    
+                    // Update stats
+                    if (isEligible) {
+                        stats.eligible++;
+                    } else {
+                        stats.notEligible++;
+                    }
+                    
+                    // Create result element
+                    const resultElement = document.createElement('div');
+                    resultElement.className = `wallet-result ${resultClass}`;
+                    
+                    // Create details table
+                    let detailsTable = `
+                        <table class="details-table">
+                            <tr>
+                                <td>Status</td>
+                                <td>${statusText}</td>
+                            </tr>
+                            <tr>
+                                <td>Address</td>
+                                <td>${data.address || 'N/A'}</td>
+                            </tr>
+                            <tr>
+                                <td>Claimed</td>
+                                <td>${data.claimed !== undefined ? data.claimed : 'N/A'}</td>
+                            </tr>
+                            <tr>
+                                <td>Can Airdrop</td>
+                                <td>${data.canAirdrop !== undefined ? data.canAirdrop : 'N/A'}</td>
+                            </tr>
+                            <tr>
+                                <td>Solana Address</td>
+                                <td>${data.solanaAddress || 'N/A'}</td>
+                            </tr>
+                            <tr>
+                                <td>Reward</td>
+                                <td>${data.reward || 'N/A'}</td>
+                            </tr>
+                        </table>
+                    `;
+                    
+                    resultElement.innerHTML = `
+                        <strong>${wallet}</strong>
+                        <button class="copy-btn" data-wallet="${wallet}">Copy</button>
+                        ${detailsTable}
+                    `;
+                    resultsDiv.appendChild(resultElement);
+                    
+                    // Add click event to copy button
+                    resultElement.querySelector('.copy-btn').addEventListener('click', function() {
+                        navigator.clipboard.writeText(this.getAttribute('data-wallet'));
+                        this.textContent = 'Copied!';
+                        setTimeout(() => {
+                            this.textContent = 'Copy';
+                        }, 2000);
+                    });
+                    
+                } catch (error) {
+                    console.error(`Error checking wallet ${wallet}:`, error);
+                    stats.error++;
+                    
+                    // Save error result
+                    results.push({
+                        wallet,
+                        data: null,
+                        status: 'error',
+                        error: error.message
+                    });
+                    
+                    const resultElement = document.createElement('div');
+                    resultElement.className = 'wallet-result error';
+                    resultElement.innerHTML = `
+                        <strong>${wallet}</strong>: Error checking eligibility
+                        <div>${error.message}</div>
+                    `;
+                    resultsDiv.appendChild(resultElement);
+                }
+                
+                currentIndex++;
+                updateStats();
+                updateProgress();
+                
+                // Process next wallet with a small delay to avoid rate limiting
+                setTimeout(processNextWallet, 300);
+            }
+            
+            function stopChecking() {
+                if (!isChecking) return;
+                stopRequested = true;
+                stopBtn.disabled = true;
+                stopBtn.textContent = 'Stopping...';
+            }
+            
+            function finishChecking() {
+                isChecking = false;
+                stopRequested = false;
+                checkBtn.disabled = false;
+                stopBtn.disabled = true;
+                stopBtn.textContent = 'Stop Checking';
+                exportBtn.disabled = false;
+                
+                if (currentIndex >= wallets.length) {
+                    progressText.textContent = '100';
+                    progressBarFill.style.width = '100%';
+                    alert('All wallets checked successfully!');
+                } else {
+                    alert(`Checking stopped. Processed ${currentIndex} of ${wallets.length} wallets.`);
+                }
+            }
+            
+            function updateProgress() {
+                const progress = Math.round((currentIndex / wallets.length) * 100);
+                progressText.textContent = progress;
+                progressBarFill.style.width = `${progress}%`;
+                processedCount.textContent = currentIndex;
+                totalCount.textContent = wallets.length;
+            }
+            
+            function updateStats() {
+                totalChecked.textContent = stats.total;
+                eligibleCount.textContent = stats.eligible;
+                notEligibleCount.textContent = stats.notEligible;
+                errorCount.textContent = stats.error;
+                
+                // Update chart
+                chart.data.datasets[0].data = [
+                    stats.eligible,
+                    stats.notEligible,
+                    stats.error
+                ];
+                chart.update();
+            }
+            
+            function clearResults() {
+                if (isChecking) {
+                    alert('Please stop the current check before clearing results');
+                    return;
+                }
+                
+                walletInput.value = '';
+                resultsDiv.innerHTML = '';
+                progressContainer.style.display = 'none';
+                statsDiv.style.display = 'none';
+                exportBtn.disabled = true;
+                
+                // Reset chart
+                chart.data.datasets[0].data = [0, 0, 0];
+                chart.update();
+            }
+            
+            function exportResults() {
+                if (results.length === 0) {
+                    alert('No results to export');
+                    return;
+                }
+                
+                // Convert results to CSV
+                const headers = [
+                    'Wallet Address',
+                    'Status',
+                    'Address',
+                    'Claimed',
+                    'Can Airdrop',
+                    'Solana Address',
+                    'Reward',
+                    'Error'
+                ];
+                
+                const csvRows = [];
+                csvRows.push(headers.join(','));
+                
+                for (const result of results) {
+                    const row = [
+                        `"${result.wallet}"`,
+                        result.status,
+                        result.data ? `"${result.data.address || ''}"` : '',
+                        result.data ? result.data.claimed : '',
+                        result.data ? result.data.canAirdrop : '',
+                        result.data ? `"${result.data.solanaAddress || ''}"` : '',
+                        result.data ? `"${result.data.reward || ''}"` : '',
+                        result.error ? `"${result.error}"` : ''
+                    ];
+                    csvRows.push(row.join(','));
+                }
+                
+                const csvContent = csvRows.join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.setAttribute('href', url);
+                link.setAttribute('download', 'wallet_eligibility_results.csv');
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        });
+    </script>
+</body>
+</html>
